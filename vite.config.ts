@@ -6,7 +6,7 @@ export default defineConfig({
     outDir: 'public',
     emptyOutDir: false,
     rollupOptions: {
-      input: 'src/browser/main.ts',
+      input: 'src/main.ts',
       output: {
         entryFileNames: 'bundle.js',
         format: 'iife',
