@@ -33,10 +33,10 @@ function mergeIncoming(state: SharedState): void {
   title.merge(state.title);
 }
 
-function broadcast(wss: WebSocketServer, msg: WSMessage): void {
+function broadcast(wss: WebSocketServer, msg: WSMessage, exclude?: WebSocket): void {
   const payload = JSON.stringify(msg);
   for (const client of wss.clients) {
-    if (client.readyState === WebSocket.OPEN) client.send(payload);
+    if (client !== exclude && client.readyState === WebSocket.OPEN) client.send(payload);
   }
 }
 
@@ -65,7 +65,8 @@ httpServer.listen(PORT, () => {
 wss.on('connection', (ws) => {
   console.log(`[server] Client connected (${wss.clients.size} total)`);
 
-  ws.send(JSON.stringify({ type: 'welcome', nodeId: SERVER_NODE_ID, state: currentState() } as WSMessage));
+  ws.send(JSON.stringify({ type: 'welcome', nodeId: SERVER_NODE_ID, state: currentState(), clientCount: wss.clients.size } as WSMessage));
+  broadcast(wss, { type: 'state', nodeId: SERVER_NODE_ID, state: currentState(), clientCount: wss.clients.size }, ws);
 
   ws.on('message', (raw) => {
     let msg: WSMessage;
@@ -77,9 +78,12 @@ wss.on('connection', (ws) => {
       `[server] from ${msg.nodeId} | todos=[${todos.elements().join(', ')}] done=[${completed.elements().join(', ')}] title="${title.get()}"`,
     );
 
-    broadcast(wss, { type: 'state', nodeId: SERVER_NODE_ID, state: currentState() });
+    broadcast(wss, { type: 'state', nodeId: SERVER_NODE_ID, state: currentState(), clientCount: wss.clients.size });
   });
 
-  ws.on('close', () => console.log(`[server] Client disconnected (${wss.clients.size} remaining)`));
+  ws.on('close', () => {
+    console.log(`[server] Client disconnected (${wss.clients.size} remaining)`);
+    broadcast(wss, { type: 'state', nodeId: SERVER_NODE_ID, state: currentState(), clientCount: wss.clients.size });
+  });
   ws.on('error', (err) => console.error('[server] error:', err.message));
 });

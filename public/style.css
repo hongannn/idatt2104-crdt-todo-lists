@@ -61,6 +61,10 @@ body {
   font-size: 0.72rem;
   color: #999;
 }
+.status-sep {
+  color: #ddd;
+}
+
 .dot {
   width: 7px;
   height: 7px;

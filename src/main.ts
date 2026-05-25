@@ -36,6 +36,9 @@ function connect(): void {
       completed.merge(msg.state.completed);
       title.merge(msg.state.title);
     }
+    if (msg.clientCount !== undefined) {
+      document.getElementById("clients-count")!.textContent = `${msg.clientCount} connected`;
+    }
     render();
   };
 

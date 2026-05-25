@@ -16,4 +16,5 @@ export interface WSMessage {
   type: MessageType;
   nodeId: string;
   state: SharedState;
+  clientCount?: number;
 }
