@@ -123,6 +123,9 @@ function render(): void {
 }
 
 function renderSidebar(): void {
+  const nav = document.getElementById("list-nav")!;
+  nav.innerHTML = "";
+
   for (const [id, list] of lists) {
     const li = document.createElement("li");
     li.className = "list-item" + (id === activeListId ? " active" : "");
@@ -142,7 +145,6 @@ function renderSidebar(): void {
     const name = document.createElement("span");
     name.textContent = list.title.get() ?? "New List";
 
-    const nav = document.getElementById("list-nav")!;
     li.appendChild(name);
     li.appendChild(del);
     nav.appendChild(li);
