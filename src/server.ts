@@ -85,8 +85,9 @@ httpServer.listen(PORT, () => {
 wss.on('connection', (ws) => {
   console.log(`[server] Client connected (${wss.clients.size} total)`);
 
-  ws.send(JSON.stringify({ type: 'welcome', nodeId: SERVER_NODE_ID, state: currentState(), clientCount: wss.clients.size } as WSMessage));
-  broadcast(wss, { type: 'state', nodeId: SERVER_NODE_ID, state: currentState(), clientCount: wss.clients.size }, ws);
+  const state = currentState();
+  ws.send(JSON.stringify({ type: 'welcome', nodeId: SERVER_NODE_ID, state, clientCount: wss.clients.size } as WSMessage));
+  broadcast(wss, { type: 'state', nodeId: SERVER_NODE_ID, state, clientCount: wss.clients.size }, ws);
 
   ws.on('message', (raw) => {
     let msg: WSMessage;
