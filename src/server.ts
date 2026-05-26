@@ -91,6 +91,12 @@ wss.on('connection', (ws) => {
   ws.on('message', (raw) => {
     let msg: WSMessage;
     try { msg = JSON.parse(raw.toString()) as WSMessage; } catch { return; }
+    if (msg.type === 'deleteList' && msg.listId) {
+      lists.delete(msg.listId);
+      broadcast(wss, { type: 'state', nodeId: SERVER_NODE_ID, state: currentState(), clientCount: wss.clients.size, deletedLists: [msg.listId] });
+      return;
+    }
+
     if (msg.type !== 'update') return;
 
     mergeIncoming(msg.state);

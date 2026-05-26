@@ -71,10 +71,37 @@ body {
   padding: 0.4rem 0.6rem;
   border-radius: 6px;
   cursor: pointer;
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: background 0.15s;
+}
+
+.list-item span {
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.btn-delete-list {
+  display: none;
+  background: none;
+  border: none;
+  color: #bbb;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color 0.2s;
+}
+
+.list-item:hover .btn-delete-list {
+  display: block;
+}
+
+.btn-delete-list:hover {
+  color: #ef4444;
 }
 
 .list-item:hover {

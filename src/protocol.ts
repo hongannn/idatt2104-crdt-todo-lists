@@ -14,11 +14,13 @@ export interface SharedState {
   lists: Record<string, ListState>;
 }
 
-export type MessageType = "welcome" | "update" | "state";
+export type MessageType = "welcome" | "update" | "state" | "deleteList";
 
 export interface WSMessage {
   type: MessageType;
   nodeId: string;
   state: SharedState;
   clientCount?: number;
+  listId?: string;
+  deletedLists?: string[];
 }

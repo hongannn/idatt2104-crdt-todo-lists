@@ -69,6 +69,12 @@ function connect(): void {
     } else if (msg.type === "state") {
       mergeLists(msg.state.lists);
     }
+    if (msg.deletedLists) {
+      for (const id of msg.deletedLists) {
+        lists.delete(id);
+        if (activeListId === id) activeListId = lists.keys().next().value ?? "";
+      }
+    }
     if (msg.clientCount !== undefined)
       document.getElementById("clients-count")!.textContent =
         `${msg.clientCount} connected`;
@@ -104,11 +110,24 @@ function renderSidebar(): void {
   for (const [id, list] of lists) {
     const li = document.createElement("li");
     li.className = "list-item" + (id === activeListId ? " active" : "");
-    li.textContent = list.title.get() ?? "New List";
     li.onclick = () => {
       activeListId = id;
       render();
     };
+
+    const name = document.createElement("span");
+    name.textContent = list.title.get() ?? "New List";
+
+    const del = document.createElement("button");
+    del.className = "btn-delete-list";
+    del.textContent = "x";
+    del.onclick = (e) => {
+      e.stopPropagation();
+      deleteList(id);
+    };
+
+    li.appendChild(name);
+    li.appendChild(del);
     nav.appendChild(li);
   }
 }
@@ -203,6 +222,22 @@ function toggleDone(text: string, isDone: boolean): void {
   if (isDone) list.completed.remove(text);
   else list.completed.add(text);
   sendUpdate();
+  render();
+}
+
+function deleteList(id: string): void {
+  if (lists.size <= 1) return;
+  lists.delete(id);
+  if (activeListId === id) activeListId = lists.keys().next().value ?? "";
+  if (ws && ws.readyState === WebSocket.OPEN)
+    ws.send(
+      JSON.stringify({
+        type: "deleteList",
+        nodeId,
+        listId: id,
+        state: localState(),
+      } as WSMessage),
+    );
   render();
 }
 
