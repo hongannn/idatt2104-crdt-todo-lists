@@ -292,6 +292,12 @@ input[type="text"]:focus {
   font-size: 0.95rem;
   color: #1a1a1a;
   word-break: break-word;
+  cursor: default;
+}
+.todo-text[contenteditable="true"] {
+  outline: none;
+  border-bottom: 1.5px solid #f9a8d4;
+  cursor: text;
 }
 .todo-item.done .todo-text {
   text-decoration: line-through;

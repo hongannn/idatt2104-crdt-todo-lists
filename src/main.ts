@@ -175,6 +175,27 @@ function renderList(): void {
       const text = document.createElement("span");
       text.className = "todo-text";
       text.textContent = item;
+      text.ondblclick = () => {
+        text.contentEditable = "true";
+        text.focus();
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        window.getSelection()?.removeAllRanges();
+        window.getSelection()?.addRange(range);
+      };
+      text.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          text.blur();
+        }
+      });
+      text.addEventListener("blur", () => {
+        if (text.contentEditable !== "true") return;
+        text.contentEditable = "false";
+        const newText = text.textContent?.trim() ?? "";
+        if (newText && newText !== item) commitEdit(item, newText);
+        else text.textContent = item;
+      });
 
       const del = document.createElement("button");
       del.className = "btn-remove";
@@ -221,6 +242,18 @@ function toggleDone(text: string, isDone: boolean): void {
   if (!list) return;
   if (isDone) list.completed.remove(text);
   else list.completed.add(text);
+  sendUpdate();
+  render();
+}
+
+function commitEdit(oldText: string, newText: string): void {
+  const list = activeList();
+  if (!list) return;
+  const wasDone = list.completed.contains(oldText);
+  list.todos.remove(oldText);
+  list.completed.remove(oldText);
+  list.todos.add(newText);
+  if (wasDone) list.completed.add(newText);
   sendUpdate();
   render();
 }
