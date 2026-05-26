@@ -13,6 +13,7 @@ const wsUrl = "ws://" + location.host;
 const input = document.getElementById("item-input") as HTMLInputElement;
 const title = document.getElementById("title")!;
 let activeListId = "";
+let editingListId = "";
 let ws: WebSocket;
 
 function getActiveList(): ListEntry | undefined {
@@ -76,6 +77,7 @@ function renderSidebar(): void {
     const li = document.createElement("li");
     li.className = "list-item" + (id === activeListId ? " active" : "");
     li.onclick = () => {
+      title.blur();
       activeListId = id;
       render();
     };
@@ -130,7 +132,8 @@ function renderList(): void {
   }
 
   const t = list.title.get();
-  if (t && t !== title.textContent!.trim() && document.activeElement !== title)
+  const editingThisList = document.activeElement === title && editingListId === activeListId;
+  if (t && t !== title.textContent!.trim() && !editingThisList)
     title.textContent = t;
 }
 
@@ -252,9 +255,17 @@ function setStatus(type: string, text: string): void {
   document.getElementById("status-text")!.textContent = text;
 }
 
+title.addEventListener("focus", () => {
+  editingListId = activeListId;
+});
+
 title.addEventListener("blur", () => {
   const list = getActiveList();
   if (!list) return;
+  if (editingListId !== activeListId) {
+    title.textContent = list.title.get() ?? "New List";
+    return;
+  }
   const val = title.textContent!.trim();
   const resolved = val || "New List";
   title.textContent = resolved;
