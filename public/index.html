@@ -6,42 +6,54 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <div class="app">
-      <div class="header">
-        <div class="title-wrap">
-          <div
-            class="title-text"
-            id="title-el"
-            contenteditable="true"
-            spellcheck="false"
-          >Todo List</div>
+    <div class="layout">
+      <div class="sidebar">
+        <div class="sidebar-header">
+          <span>Lists</span>
+          <button id="btn-new-list">+</button>
         </div>
-        <div class="status">
-          <div class="dot" id="dot"></div>
-          <span id="status-text">Connecting</span>
-          <span class="status-sep">·</span>
-          <span id="clients-count">0 connected</span>
-        </div>
+        <ul id="list-nav"></ul>
       </div>
 
-      <div class="add-row">
-        <input
-          type="text"
-          id="item-input"
-          placeholder="Add a new task..."
-          autocomplete="off"
-        />
-        <button class="btn-add" id="btn-add" title="Add">+</button>
+      <div class="app">
+        <div class="header">
+          <div class="title-wrap">
+            <div
+              class="title-text"
+              id="title-el"
+              contenteditable="true"
+              spellcheck="false"
+            >
+              Todo List
+            </div>
+          </div>
+          <div class="status">
+            <div class="dot" id="dot"></div>
+            <span id="status-text">Connecting</span>
+            <span class="status-sep">·</span>
+            <span id="clients-count">0 connected</span>
+          </div>
+        </div>
+
+        <div class="add-row">
+          <input
+            type="text"
+            id="item-input"
+            placeholder="Add a new task..."
+            autocomplete="off"
+          />
+          <button class="btn-add" id="btn-add" title="Add">+</button>
+        </div>
+
+        <div class="section-label" id="active-label">Tasks</div>
+        <ul class="todo-list" id="todo-list"></ul>
+
+        <template id="empty-template">
+          <li class="empty">No tasks yet.</li>
+        </template>
+
+        <div class="node-id" id="node-id"></div>
       </div>
-
-      <div class="section-label" id="active-label">Tasks</div>
-      <ul class="todo-list" id="todo-list"></ul>
-
-      <template id="empty-template">
-        <li class="empty">No tasks yet. Add one above!</li>
-      </template>
-
-      <div class="node-id" id="node-id"></div>
     </div>
 
     <script src="bundle.js"></script>

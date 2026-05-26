@@ -2,12 +2,16 @@ import type { LWWRegisterState } from "./crdt/LWWRegister";
 import type { ORSetState } from "./crdt/ORSet";
 
 /**
- * Shared state for the collaborative todo list.
+ * Shared state for a collaborative todo list.
  */
-export interface SharedState {
+export interface ListState {
   todos: ORSetState;
   completed: ORSetState;
   title: LWWRegisterState<string>;
+}
+
+export interface SharedState {
+  lists: Record<string, ListState>;
 }
 
 export type MessageType = "welcome" | "update" | "state";

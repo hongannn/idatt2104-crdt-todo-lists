@@ -1,36 +1,56 @@
-/**
- * CRDT Collaborative Todo List — Server
- *
- * Maintains a globally merged SharedState.
- * On each client update: merges state, broadcasts result to all clients.
- */
 import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { LWWRegister } from './crdt/LWWRegister';
 import { ORSet } from './crdt/ORSet';
-import type { SharedState, WSMessage } from './protocol';
+import type { ListState, SharedState, WSMessage } from './protocol';
 
 const PORT = 3001;
 const SERVER_NODE_ID = 'server';
 
-let todos     = new ORSet(SERVER_NODE_ID);
-let completed = new ORSet(SERVER_NODE_ID);
-let title     = new LWWRegister<string>(SERVER_NODE_ID);
+interface ListCRDTs {
+  todos: ORSet;
+  completed: ORSet;
+  title: LWWRegister<string>;
+}
 
-function currentState(): SharedState {
+function makeList(state?: ListState): ListCRDTs {
   return {
-    todos:     todos.getState(),
-    completed: completed.getState(),
-    title:     title.getState(),
+    todos: new ORSet(SERVER_NODE_ID, state?.todos),
+    completed: new ORSet(SERVER_NODE_ID, state?.completed),
+    title: new LWWRegister<string>(SERVER_NODE_ID, state?.title),
   };
 }
 
+const lists = new Map<string, ListCRDTs>();
+const defaultList = makeList();
+defaultList.title.set('New List');
+lists.set('default', defaultList);
+
+function currentState(): SharedState {
+  const result: Record<string, ListState> = {};
+  for (const [id, list] of lists) {
+    result[id] = {
+      todos: list.todos.getState(),
+      completed: list.completed.getState(),
+      title: list.title.getState(),
+    };
+  }
+  return { lists: result };
+}
+
 function mergeIncoming(state: SharedState): void {
-  todos.merge(state.todos);
-  completed.merge(state.completed);
-  title.merge(state.title);
+  for (const [id, listState] of Object.entries(state.lists)) {
+    if (!lists.has(id)) {
+      lists.set(id, makeList(listState));
+    } else {
+      const list = lists.get(id)!;
+      list.todos.merge(listState.todos);
+      list.completed.merge(listState.completed);
+      list.title.merge(listState.title);
+    }
+  }
 }
 
 function broadcast(wss: WebSocketServer, msg: WSMessage, exclude?: WebSocket): void {
@@ -74,9 +94,7 @@ wss.on('connection', (ws) => {
     if (msg.type !== 'update') return;
 
     mergeIncoming(msg.state);
-    console.log(
-      `[server] from ${msg.nodeId} | todos=[${todos.elements().join(', ')}] done=[${completed.elements().join(', ')}] title="${title.get()}"`,
-    );
+    console.log(`[server] from ${msg.nodeId} | ${lists.size} lists`);
 
     broadcast(wss, { type: 'state', nodeId: SERVER_NODE_ID, state: currentState(), clientCount: wss.clients.size });
   });
