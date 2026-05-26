@@ -2,76 +2,21 @@ import * as http from "http";
 import * as fs from "fs";
 import * as path from "path";
 import { WebSocketServer, WebSocket } from "ws";
-import { LWWRegister, type LWWRegisterState } from "./crdt/LWWRegister";
-import { ORSet } from "./crdt/ORSet";
-import type { ListState, SharedState, WSMessage } from "./protocol";
+import {
+  makeList,
+  mergeLists,
+  serializeState,
+  type ListEntry,
+} from "./listUtils";
+import type { WSMessage } from "./protocol";
 
 const PORT = 3001;
 const SERVER_NODE_ID = "server";
 
-interface ListCRDTs {
-  todos: ORSet;
-  completed: ORSet;
-  title: LWWRegister<string>;
-  itemTexts: Map<string, LWWRegister<string>>;
-}
-
-function makeList(state?: ListState): ListCRDTs {
-  const itemTexts = new Map<string, LWWRegister<string>>();
-  for (const [id, s] of Object.entries(state?.texts ?? {})) {
-    itemTexts.set(id, new LWWRegister<string>(SERVER_NODE_ID, s));
-  }
-  return {
-    todos: new ORSet(SERVER_NODE_ID, state?.todos),
-    completed: new ORSet(SERVER_NODE_ID, state?.completed),
-    title: new LWWRegister<string>(SERVER_NODE_ID, state?.title),
-    itemTexts,
-  };
-}
-
-const lists = new Map<string, ListCRDTs>();
-const defaultList = makeList();
+const lists = new Map<string, ListEntry>();
+const defaultList = makeList(SERVER_NODE_ID);
 defaultList.title.set("New List");
 lists.set("default", defaultList);
-
-function currentState(): SharedState {
-  const result: Record<string, ListState> = {};
-  for (const [id, list] of lists) {
-    const texts: Record<string, LWWRegisterState<string>> = {};
-    for (const [textId, reg] of list.itemTexts) {
-      texts[textId] = reg.getState();
-    }
-    result[id] = {
-      todos: list.todos.getState(),
-      completed: list.completed.getState(),
-      title: list.title.getState(),
-      texts,
-    };
-  }
-  return { lists: result };
-}
-
-function mergeIncoming(state: SharedState): void {
-  for (const [id, listState] of Object.entries(state.lists)) {
-    if (!lists.has(id)) {
-      lists.set(id, makeList(listState));
-    } else {
-      const list = lists.get(id)!;
-      list.todos.merge(listState.todos);
-      list.completed.merge(listState.completed);
-      list.title.merge(listState.title);
-      for (const [textId, textState] of Object.entries(listState.texts ?? {})) {
-        const reg = list.itemTexts.get(textId);
-        if (reg) reg.merge(textState);
-        else
-          list.itemTexts.set(
-            textId,
-            new LWWRegister<string>(SERVER_NODE_ID, textState),
-          );
-      }
-    }
-  }
-}
 
 function broadcast(
   wss: WebSocketServer,
@@ -114,7 +59,7 @@ httpServer.listen(PORT, () => {
 wss.on("connection", (ws) => {
   console.log(`[server] Client connected (${wss.clients.size} total)`);
 
-  const state = currentState();
+  const state = serializeState(lists);
   ws.send(
     JSON.stringify({
       type: "welcome",
@@ -146,7 +91,7 @@ wss.on("connection", (ws) => {
       broadcast(wss, {
         type: "state",
         nodeId: SERVER_NODE_ID,
-        state: currentState(),
+        state: serializeState(lists),
         clientCount: wss.clients.size,
         deletedLists: [msg.listId],
       });
@@ -155,13 +100,13 @@ wss.on("connection", (ws) => {
 
     if (msg.type !== "update") return;
 
-    mergeIncoming(msg.state);
+    mergeLists(lists, SERVER_NODE_ID, msg.state.lists);
     console.log(`[server] from ${msg.nodeId} | ${lists.size} lists`);
 
     broadcast(wss, {
       type: "state",
       nodeId: SERVER_NODE_ID,
-      state: currentState(),
+      state: serializeState(lists),
       clientCount: wss.clients.size,
     });
   });
@@ -171,7 +116,7 @@ wss.on("connection", (ws) => {
     broadcast(wss, {
       type: "state",
       nodeId: SERVER_NODE_ID,
-      state: currentState(),
+      state: serializeState(lists),
       clientCount: wss.clients.size,
     });
   });

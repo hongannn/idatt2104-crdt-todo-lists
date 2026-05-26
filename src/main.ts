@@ -1,6 +1,11 @@
-import { ORSet } from "./crdt/ORSet";
-import { LWWRegister, type LWWRegisterState } from "./crdt/LWWRegister";
-import type { ListState, SharedState, WSMessage } from "./protocol";
+import { LWWRegister } from "./crdt/LWWRegister";
+import {
+  makeList,
+  mergeLists,
+  serializeState,
+  type ListEntry,
+} from "./listUtils";
+import type { WSMessage } from "./protocol";
 
 const nodeId = Math.random().toString(36).slice(2, 8);
 const lists = new Map<string, ListEntry>();
@@ -10,67 +15,8 @@ const title = document.getElementById("title")!;
 let activeListId = "";
 let ws: WebSocket;
 
-interface ListEntry {
-  todos: ORSet;
-  completed: ORSet;
-  title: LWWRegister<string>;
-  itemTexts: Map<string, LWWRegister<string>>;
-}
-
 function getActiveList(): ListEntry | undefined {
   return lists.get(activeListId);
-}
-
-function makeList(state?: ListState): ListEntry {
-  const itemTexts = new Map<string, LWWRegister<string>>();
-  for (const [id, s] of Object.entries(state?.texts ?? {})) {
-    itemTexts.set(id, new LWWRegister<string>(nodeId, s));
-  }
-  return {
-    todos: new ORSet(nodeId, state?.todos),
-    completed: new ORSet(nodeId, state?.completed),
-    title: new LWWRegister<string>(nodeId, state?.title),
-    itemTexts,
-  };
-}
-
-function mergeLists(incoming: Record<string, ListState>): void {
-  for (const [id, state] of Object.entries(incoming)) {
-    if (!lists.has(id)) {
-      lists.set(id, makeList(state));
-    } else {
-      const list = lists.get(id)!;
-      list.todos.merge(state.todos);
-      list.completed.merge(state.completed);
-      list.title.merge(state.title);
-      for (const [textId, textState] of Object.entries(state.texts ?? {})) {
-        const reg = list.itemTexts.get(textId);
-        if (reg) reg.merge(textState);
-        else
-          list.itemTexts.set(
-            textId,
-            new LWWRegister<string>(nodeId, textState),
-          );
-      }
-    }
-  }
-}
-
-function localState(): SharedState {
-  const result: Record<string, ListState> = {};
-  for (const [id, list] of lists) {
-    const texts: Record<string, LWWRegisterState<string>> = {};
-    for (const [textId, reg] of list.itemTexts) {
-      texts[textId] = reg.getState();
-    }
-    result[id] = {
-      todos: list.todos.getState(),
-      completed: list.completed.getState(),
-      title: list.title.getState(),
-      texts,
-    };
-  }
-  return { lists: result };
 }
 
 function connect(): void {
@@ -81,11 +27,11 @@ function connect(): void {
     const msg = JSON.parse(ev.data) as WSMessage;
     if (msg.type === "welcome") {
       lists.clear();
-      mergeLists(msg.state.lists);
+      mergeLists(lists, nodeId, msg.state.lists);
       if (!lists.has(activeListId))
         activeListId = Object.keys(msg.state.lists)[0] ?? "";
     } else if (msg.type === "state") {
-      mergeLists(msg.state.lists);
+      mergeLists(lists, nodeId, msg.state.lists);
     }
     if (msg.deletedLists) {
       for (const id of msg.deletedLists) {
@@ -112,7 +58,7 @@ function sendUpdate(): void {
       JSON.stringify({
         type: "update",
         nodeId,
-        state: localState(),
+        state: serializeState(lists),
       } as WSMessage),
     );
 }
@@ -285,7 +231,7 @@ function deleteList(id: string): void {
         type: "deleteList",
         nodeId,
         listId: id,
-        state: localState(),
+        state: serializeState(lists),
       } as WSMessage),
     );
   render();
@@ -293,7 +239,7 @@ function deleteList(id: string): void {
 
 function createList(): void {
   const id = "list-" + Math.random().toString(36).slice(2, 8);
-  const entry = makeList();
+  const entry = makeList(nodeId);
   entry.title.set("New List");
   lists.set(id, entry);
   activeListId = id;
