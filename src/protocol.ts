@@ -8,6 +8,7 @@ export interface ListState {
   todos: ORSetState;
   completed: ORSetState;
   title: LWWRegisterState<string>;
+  texts: Record<string, LWWRegisterState<string>>;
 }
 
 export interface SharedState {

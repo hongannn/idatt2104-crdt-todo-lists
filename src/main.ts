@@ -1,28 +1,34 @@
 import { ORSet } from "./crdt/ORSet";
-import { LWWRegister } from "./crdt/LWWRegister";
+import { LWWRegister, type LWWRegisterState } from "./crdt/LWWRegister";
 import type { ListState, SharedState, WSMessage } from "./protocol";
 
-const nodeId = "browser-" + Math.random().toString(36).slice(2, 8);
-document.getElementById("node-id")!.textContent = "Node: " + nodeId;
+const nodeId = Math.random().toString(36).slice(2, 8);
+const lists = new Map<string, ListEntry>();
+const wsUrl = "ws://" + location.host;
+let activeListId = "";
+let ws: WebSocket;
 
 interface ListEntry {
   todos: ORSet;
   completed: ORSet;
   title: LWWRegister<string>;
+  itemTexts: Map<string, LWWRegister<string>>;
 }
 
-const lists = new Map<string, ListEntry>();
-let activeListId = "";
-
-function activeList(): ListEntry | undefined {
+function getActiveList(): ListEntry | undefined {
   return lists.get(activeListId);
 }
 
 function makeList(state?: ListState): ListEntry {
+  const itemTexts = new Map<string, LWWRegister<string>>();
+  for (const [id, s] of Object.entries(state?.texts ?? {})) {
+    itemTexts.set(id, new LWWRegister<string>(nodeId, s));
+  }
   return {
     todos: new ORSet(nodeId, state?.todos),
     completed: new ORSet(nodeId, state?.completed),
     title: new LWWRegister<string>(nodeId, state?.title),
+    itemTexts,
   };
 }
 
@@ -35,6 +41,11 @@ function mergeLists(incoming: Record<string, ListState>): void {
       list.todos.merge(state.todos);
       list.completed.merge(state.completed);
       list.title.merge(state.title);
+      for (const [textId, textState] of Object.entries(state.texts ?? {})) {
+        const reg = list.itemTexts.get(textId);
+        if (reg) reg.merge(textState);
+        else list.itemTexts.set(textId, new LWWRegister<string>(nodeId, textState));
+      }
     }
   }
 }
@@ -42,21 +53,22 @@ function mergeLists(incoming: Record<string, ListState>): void {
 function localState(): SharedState {
   const result: Record<string, ListState> = {};
   for (const [id, list] of lists) {
+    const texts: Record<string, LWWRegisterState<string>> = {};
+    for (const [textId, reg] of list.itemTexts) {
+      texts[textId] = reg.getState();
+    }
     result[id] = {
       todos: list.todos.getState(),
       completed: list.completed.getState(),
       title: list.title.getState(),
+      texts,
     };
   }
   return { lists: result };
 }
 
-const wsUrl = "ws://" + location.host;
-let ws: WebSocket;
-
 function connect(): void {
   ws = new WebSocket(wsUrl);
-
   ws.onopen = () => setStatus("connected", "Connected");
 
   ws.onmessage = (ev) => {
@@ -105,8 +117,6 @@ function render(): void {
 }
 
 function renderSidebar(): void {
-  const nav = document.getElementById("list-nav")!;
-  nav.innerHTML = "";
   for (const [id, list] of lists) {
     const li = document.createElement("li");
     li.className = "list-item" + (id === activeListId ? " active" : "");
@@ -114,9 +124,6 @@ function renderSidebar(): void {
       activeListId = id;
       render();
     };
-
-    const name = document.createElement("span");
-    name.textContent = list.title.get() ?? "New List";
 
     const del = document.createElement("button");
     del.className = "btn-delete-list";
@@ -126,6 +133,10 @@ function renderSidebar(): void {
       deleteList(id);
     };
 
+    const name = document.createElement("span");
+    name.textContent = list.title.get() ?? "New List";
+
+    const nav = document.getElementById("list-nav")!;
     li.appendChild(name);
     li.appendChild(del);
     nav.appendChild(li);
@@ -133,19 +144,17 @@ function renderSidebar(): void {
 }
 
 function renderList(): void {
-  const list = activeList();
+  const list = getActiveList();
   const todoList = document.getElementById("todo-list")!;
   const label = document.getElementById("active-label")!;
+  todoList.innerHTML = "";
 
   if (!list) {
-    todoList.innerHTML = "";
     label.textContent = "Tasks";
     return;
   }
 
   const items = list.todos.elements();
-  todoList.innerHTML = "";
-
   if (items.length === 0) {
     const tmpl = document.getElementById(
       "empty-template",
@@ -153,27 +162,29 @@ function renderList(): void {
     todoList.appendChild(tmpl.content.cloneNode(true));
     label.textContent = "Tasks";
   } else {
-    const done = items.filter((t) => list.completed.contains(t));
+    const done = items.filter((id) => list.completed.contains(id));
     label.textContent = `Tasks — ${done.length}/${items.length} done`;
 
     const sorted = [
-      ...items.filter((t) => !list.completed.contains(t)),
+      ...items.filter((id) => !list.completed.contains(id)),
       ...done,
     ];
 
-    for (const item of sorted) {
-      const isDone = list.completed.contains(item);
+    for (const id of sorted) {
+      const isDone = list.completed.contains(id);
+      const currentText = list.itemTexts.get(id)?.get() ?? "";
+
       const li = document.createElement("li");
       li.className = "todo-item" + (isDone ? " done" : "");
 
       const box = document.createElement("div");
       box.className = "checkbox" + (isDone ? " checked" : "");
       box.title = isDone ? "Mark undone" : "Mark done";
-      box.onclick = () => toggleDone(item, isDone);
+      box.onclick = () => toggleDone(id, isDone);
 
       const text = document.createElement("span");
       text.className = "todo-text";
-      text.textContent = item;
+      text.textContent = currentText;
       text.ondblclick = () => {
         text.contentEditable = "true";
         text.focus();
@@ -192,15 +203,15 @@ function renderList(): void {
         if (text.contentEditable !== "true") return;
         text.contentEditable = "false";
         const newText = text.textContent?.trim() ?? "";
-        if (newText && newText !== item) commitEdit(item, newText);
-        else text.textContent = item;
+        if (newText && newText !== currentText) commitEdit(id, newText);
+        else text.textContent = currentText;
       });
 
       const del = document.createElement("button");
       del.className = "btn-remove";
       del.textContent = "x";
       del.title = "Remove";
-      del.onclick = () => removeItem(item);
+      del.onclick = () => removeItem(id);
 
       li.appendChild(box);
       li.appendChild(text);
@@ -218,41 +229,40 @@ function renderList(): void {
     titleEl.textContent = t;
 }
 
-// Actions
 function addItem(text: string): void {
-  const list = activeList();
-  if (!list || !text || list.todos.contains(text)) return;
-  list.todos.add(text);
+  const list = getActiveList();
+  if (!list || !text) return;
+  const id = Math.random().toString(36).slice(2, 10);
+  const reg = new LWWRegister<string>(nodeId);
+  reg.set(text);
+  list.itemTexts.set(id, reg);
+  list.todos.add(id);
   sendUpdate();
   render();
 }
 
-function removeItem(text: string): void {
-  const list = activeList();
+function removeItem(id: string): void {
+  const list = getActiveList();
   if (!list) return;
-  list.todos.remove(text);
-  list.completed.remove(text);
+  list.todos.remove(id);
+  list.completed.remove(id);
   sendUpdate();
   render();
 }
 
-function toggleDone(text: string, isDone: boolean): void {
-  const list = activeList();
+function toggleDone(id: string, isDone: boolean): void {
+  const list = getActiveList();
   if (!list) return;
-  if (isDone) list.completed.remove(text);
-  else list.completed.add(text);
+  if (isDone) list.completed.remove(id);
+  else list.completed.add(id);
   sendUpdate();
   render();
 }
 
-function commitEdit(oldText: string, newText: string): void {
-  const list = activeList();
+function commitEdit(id: string, newText: string): void {
+  const list = getActiveList();
   if (!list) return;
-  const wasDone = list.completed.contains(oldText);
-  list.todos.remove(oldText);
-  list.completed.remove(oldText);
-  list.todos.add(newText);
-  if (wasDone) list.completed.add(newText);
+  list.itemTexts.get(id)!.set(newText);
   sendUpdate();
   render();
 }
@@ -283,11 +293,10 @@ function createList(): void {
   render();
 }
 
-// Title editing
 const titleEl = document.getElementById("title-el")!;
 
 titleEl.addEventListener("blur", () => {
-  const list = activeList();
+  const list = getActiveList();
   if (!list) return;
   const val = titleEl.textContent!.trim();
   const resolved = val || "New List";

@@ -1,40 +1,51 @@
-import * as http from 'http';
-import * as fs from 'fs';
-import * as path from 'path';
-import { WebSocketServer, WebSocket } from 'ws';
-import { LWWRegister } from './crdt/LWWRegister';
-import { ORSet } from './crdt/ORSet';
-import type { ListState, SharedState, WSMessage } from './protocol';
+import * as http from "http";
+import * as fs from "fs";
+import * as path from "path";
+import { WebSocketServer, WebSocket } from "ws";
+import { LWWRegister, type LWWRegisterState } from "./crdt/LWWRegister";
+import { ORSet } from "./crdt/ORSet";
+import type { ListState, SharedState, WSMessage } from "./protocol";
 
 const PORT = 3001;
-const SERVER_NODE_ID = 'server';
+const SERVER_NODE_ID = "server";
 
 interface ListCRDTs {
   todos: ORSet;
   completed: ORSet;
   title: LWWRegister<string>;
+  itemTexts: Map<string, LWWRegister<string>>;
 }
 
 function makeList(state?: ListState): ListCRDTs {
+  const itemTexts = new Map<string, LWWRegister<string>>();
+  for (const [id, s] of Object.entries(state?.texts ?? {})) {
+    itemTexts.set(id, new LWWRegister<string>(SERVER_NODE_ID, s));
+  }
   return {
     todos: new ORSet(SERVER_NODE_ID, state?.todos),
     completed: new ORSet(SERVER_NODE_ID, state?.completed),
     title: new LWWRegister<string>(SERVER_NODE_ID, state?.title),
+    itemTexts,
   };
 }
 
 const lists = new Map<string, ListCRDTs>();
 const defaultList = makeList();
-defaultList.title.set('New List');
-lists.set('default', defaultList);
+defaultList.title.set("New List");
+lists.set("default", defaultList);
 
 function currentState(): SharedState {
   const result: Record<string, ListState> = {};
   for (const [id, list] of lists) {
+    const texts: Record<string, LWWRegisterState<string>> = {};
+    for (const [textId, reg] of list.itemTexts) {
+      texts[textId] = reg.getState();
+    }
     result[id] = {
       todos: list.todos.getState(),
       completed: list.completed.getState(),
       title: list.title.getState(),
+      texts,
     };
   }
   return { lists: result };
@@ -49,30 +60,48 @@ function mergeIncoming(state: SharedState): void {
       list.todos.merge(listState.todos);
       list.completed.merge(listState.completed);
       list.title.merge(listState.title);
+      for (const [textId, textState] of Object.entries(listState.texts ?? {})) {
+        const reg = list.itemTexts.get(textId);
+        if (reg) reg.merge(textState);
+        else
+          list.itemTexts.set(
+            textId,
+            new LWWRegister<string>(SERVER_NODE_ID, textState),
+          );
+      }
     }
   }
 }
 
-function broadcast(wss: WebSocketServer, msg: WSMessage, exclude?: WebSocket): void {
+function broadcast(
+  wss: WebSocketServer,
+  msg: WSMessage,
+  exclude?: WebSocket,
+): void {
   const payload = JSON.stringify(msg);
   for (const client of wss.clients) {
-    if (client !== exclude && client.readyState === WebSocket.OPEN) client.send(payload);
+    if (client !== exclude && client.readyState === WebSocket.OPEN)
+      client.send(payload);
   }
 }
 
 const MIME: Record<string, string> = {
-  '.html': 'text/html',
-  '.css':  'text/css',
-  '.js':   'text/javascript',
+  ".html": "text/html",
+  ".css": "text/css",
+  ".js": "text/javascript",
 };
 
 const httpServer = http.createServer((req, res) => {
-  const url = req.url === '/' ? '/index.html' : req.url ?? '/index.html';
+  const url = req.url === "/" ? "/index.html" : (req.url ?? "/index.html");
   const ext = path.extname(url);
-  const filePath = path.join(__dirname, '..', 'public', path.basename(url));
+  const filePath = path.join(__dirname, "..", "public", path.basename(url));
   fs.readFile(filePath, (err, data) => {
-    if (err) { res.writeHead(404); res.end('Not found'); return; }
-    res.writeHead(200, { 'Content-Type': MIME[ext] ?? 'text/plain' });
+    if (err) {
+      res.writeHead(404);
+      res.end("Not found");
+      return;
+    }
+    res.writeHead(200, { "Content-Type": MIME[ext] ?? "text/plain" });
     res.end(data);
   });
 });
@@ -82,33 +111,69 @@ httpServer.listen(PORT, () => {
   console.log(`[server] http://localhost:${PORT}`);
 });
 
-wss.on('connection', (ws) => {
+wss.on("connection", (ws) => {
   console.log(`[server] Client connected (${wss.clients.size} total)`);
 
   const state = currentState();
-  ws.send(JSON.stringify({ type: 'welcome', nodeId: SERVER_NODE_ID, state, clientCount: wss.clients.size } as WSMessage));
-  broadcast(wss, { type: 'state', nodeId: SERVER_NODE_ID, state, clientCount: wss.clients.size }, ws);
+  ws.send(
+    JSON.stringify({
+      type: "welcome",
+      nodeId: SERVER_NODE_ID,
+      state,
+      clientCount: wss.clients.size,
+    } as WSMessage),
+  );
+  broadcast(
+    wss,
+    {
+      type: "state",
+      nodeId: SERVER_NODE_ID,
+      state,
+      clientCount: wss.clients.size,
+    },
+    ws,
+  );
 
-  ws.on('message', (raw) => {
+  ws.on("message", (raw) => {
     let msg: WSMessage;
-    try { msg = JSON.parse(raw.toString()) as WSMessage; } catch { return; }
-    if (msg.type === 'deleteList' && msg.listId) {
+    try {
+      msg = JSON.parse(raw.toString()) as WSMessage;
+    } catch {
+      return;
+    }
+    if (msg.type === "deleteList" && msg.listId) {
       lists.delete(msg.listId);
-      broadcast(wss, { type: 'state', nodeId: SERVER_NODE_ID, state: currentState(), clientCount: wss.clients.size, deletedLists: [msg.listId] });
+      broadcast(wss, {
+        type: "state",
+        nodeId: SERVER_NODE_ID,
+        state: currentState(),
+        clientCount: wss.clients.size,
+        deletedLists: [msg.listId],
+      });
       return;
     }
 
-    if (msg.type !== 'update') return;
+    if (msg.type !== "update") return;
 
     mergeIncoming(msg.state);
     console.log(`[server] from ${msg.nodeId} | ${lists.size} lists`);
 
-    broadcast(wss, { type: 'state', nodeId: SERVER_NODE_ID, state: currentState(), clientCount: wss.clients.size });
+    broadcast(wss, {
+      type: "state",
+      nodeId: SERVER_NODE_ID,
+      state: currentState(),
+      clientCount: wss.clients.size,
+    });
   });
 
-  ws.on('close', () => {
+  ws.on("close", () => {
     console.log(`[server] Client disconnected (${wss.clients.size} remaining)`);
-    broadcast(wss, { type: 'state', nodeId: SERVER_NODE_ID, state: currentState(), clientCount: wss.clients.size });
+    broadcast(wss, {
+      type: "state",
+      nodeId: SERVER_NODE_ID,
+      state: currentState(),
+      clientCount: wss.clients.size,
+    });
   });
-  ws.on('error', (err) => console.error('[server] error:', err.message));
+  ws.on("error", (err) => console.error("[server] error:", err.message));
 });
