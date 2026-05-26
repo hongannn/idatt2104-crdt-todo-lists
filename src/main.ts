@@ -5,6 +5,8 @@ import type { ListState, SharedState, WSMessage } from "./protocol";
 const nodeId = Math.random().toString(36).slice(2, 8);
 const lists = new Map<string, ListEntry>();
 const wsUrl = "ws://" + location.host;
+const input = document.getElementById("item-input") as HTMLInputElement;
+const title = document.getElementById("title")!;
 let activeListId = "";
 let ws: WebSocket;
 
@@ -44,7 +46,11 @@ function mergeLists(incoming: Record<string, ListState>): void {
       for (const [textId, textState] of Object.entries(state.texts ?? {})) {
         const reg = list.itemTexts.get(textId);
         if (reg) reg.merge(textState);
-        else list.itemTexts.set(textId, new LWWRegister<string>(nodeId, textState));
+        else
+          list.itemTexts.set(
+            textId,
+            new LWWRegister<string>(nodeId, textState),
+          );
       }
     }
   }
@@ -171,62 +177,62 @@ function renderList(): void {
     ];
 
     for (const id of sorted) {
-      const isDone = list.completed.contains(id);
-      const currentText = list.itemTexts.get(id)?.get() ?? "";
-
-      const li = document.createElement("li");
-      li.className = "todo-item" + (isDone ? " done" : "");
-
-      const box = document.createElement("div");
-      box.className = "checkbox" + (isDone ? " checked" : "");
-      box.title = isDone ? "Mark undone" : "Mark done";
-      box.onclick = () => toggleDone(id, isDone);
-
-      const text = document.createElement("span");
-      text.className = "todo-text";
-      text.textContent = currentText;
-      text.ondblclick = () => {
-        text.contentEditable = "true";
-        text.focus();
-        const range = document.createRange();
-        range.selectNodeContents(text);
-        window.getSelection()?.removeAllRanges();
-        window.getSelection()?.addRange(range);
-      };
-      text.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          text.blur();
-        }
-      });
-      text.addEventListener("blur", () => {
-        if (text.contentEditable !== "true") return;
-        text.contentEditable = "false";
-        const newText = text.textContent?.trim() ?? "";
-        if (newText && newText !== currentText) commitEdit(id, newText);
-        else text.textContent = currentText;
-      });
-
-      const del = document.createElement("button");
-      del.className = "btn-remove";
-      del.textContent = "x";
-      del.title = "Remove";
-      del.onclick = () => removeItem(id);
-
-      li.appendChild(box);
-      li.appendChild(text);
-      li.appendChild(del);
-      todoList.appendChild(li);
+      todoList.appendChild(makeTodoItem(id, list));
     }
   }
 
   const t = list.title.get();
-  if (
-    t &&
-    t !== titleEl.textContent!.trim() &&
-    document.activeElement !== titleEl
-  )
-    titleEl.textContent = t;
+  if (t && t !== title.textContent!.trim() && document.activeElement !== title)
+    title.textContent = t;
+}
+
+function makeTodoItem(id: string, list: ListEntry): HTMLElement {
+  const isDone = list.completed.contains(id);
+  const currentText = list.itemTexts.get(id)?.get() ?? "";
+
+  const li = document.createElement("li");
+  li.className = "todo-item" + (isDone ? " done" : "");
+
+  const box = document.createElement("div");
+  box.className = "checkbox" + (isDone ? " checked" : "");
+  box.title = isDone ? "Mark undone" : "Mark done";
+  box.onclick = () => toggleDone(id, isDone);
+
+  const text = document.createElement("span");
+  text.className = "todo-text";
+  text.textContent = currentText;
+  text.ondblclick = () => {
+    text.contentEditable = "true";
+    text.focus();
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+  };
+  text.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      text.blur();
+    }
+  });
+  text.addEventListener("blur", () => {
+    if (text.contentEditable !== "true") return;
+    text.contentEditable = "false";
+    const newText = text.textContent?.trim() ?? "";
+    if (newText && newText !== currentText) commitEdit(id, newText);
+    else text.textContent = currentText;
+  });
+
+  const del = document.createElement("button");
+  del.className = "btn-remove";
+  del.textContent = "x";
+  del.title = "Remove";
+  del.onclick = () => removeItem(id);
+
+  li.appendChild(box);
+  li.appendChild(text);
+  li.appendChild(del);
+  return li;
 }
 
 function addItem(text: string): void {
@@ -293,14 +299,17 @@ function createList(): void {
   render();
 }
 
-const titleEl = document.getElementById("title-el")!;
+function setStatus(type: string, text: string): void {
+  document.getElementById("dot")!.className = "dot " + type;
+  document.getElementById("status-text")!.textContent = text;
+}
 
-titleEl.addEventListener("blur", () => {
+title.addEventListener("blur", () => {
   const list = getActiveList();
   if (!list) return;
-  const val = titleEl.textContent!.trim();
+  const val = title.textContent!.trim();
   const resolved = val || "New List";
-  titleEl.textContent = resolved;
+  title.textContent = resolved;
   if (resolved !== list.title.get()) {
     list.title.set(resolved);
     sendUpdate();
@@ -308,14 +317,12 @@ titleEl.addEventListener("blur", () => {
   }
 });
 
-titleEl.addEventListener("keydown", (e) => {
+title.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
-    titleEl.blur();
+    title.blur();
   }
 });
-
-const input = document.getElementById("item-input") as HTMLInputElement;
 
 document.getElementById("btn-add")!.onclick = () => {
   const v = input.value.trim();
@@ -331,10 +338,5 @@ input.addEventListener("keydown", (e) => {
 });
 
 document.getElementById("btn-new-list")!.onclick = () => createList();
-
-function setStatus(type: string, text: string): void {
-  document.getElementById("dot")!.className = "dot " + type;
-  document.getElementById("status-text")!.textContent = text;
-}
 
 connect();
