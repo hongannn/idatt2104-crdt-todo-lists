@@ -136,7 +136,6 @@ function renderList(): void {
   const list = activeList();
   const todoList = document.getElementById("todo-list")!;
   const label = document.getElementById("active-label")!;
-  const titleEl = document.getElementById("title-el")!;
 
   if (!list) {
     todoList.innerHTML = "";
